@@ -1,3 +1,4 @@
+# mingw-w64-x86_64-SDL2 in pacman
 # No extension for the executable
 TARGET_EXEC ?= JoyCon_Droid_PC.exe
 
@@ -8,11 +9,11 @@ SRC_DIRS ?= ./source
 CFLAGS := -std=gnu11
 # C++ flags
 # Single precision sets all defined floating point numbers to floats, saves on memory
-CXXFLAGS := -std=c++11 -fsingle-precision-constant
+CXXFLAGS := -std=c++11 -fsingle-precision-constant $(shell pkg-config --cflags sdl2)
 # C/C++ flags (no -pendantic)
 CPPFLAGS := -g -Wall -Wextra
 # Linker flags (-lpthread needed for threads)
-LDFLAGS := -lpthread
+LDFLAGS := -lpthread $(shell pkg-config --libs sdl2)
 
 SRCS := $(shell find $(SRC_DIRS) -name *.cpp -or -name *.c -or -name *.s)
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
