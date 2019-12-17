@@ -1,0 +1,19 @@
+[{
+	"directory": "C:\\Users\\aehar\\Desktop\\projects\\VSC_Projects\\JoyCon-Droid-PC\\pc_application",
+	"arguments": [
+		"x86_64-w64-mingw32-g++",
+		"-g",
+		"-Wall",
+		"-Wextra",
+		"-std=c++11",
+		"-fsingle-precision-constant",
+		"-Dmain=SDL_main",
+		"-IC:/msys2/mingw64/include/SDL2",
+		"-I./include",
+		"-c",
+		"source/main.cpp",
+		"-o",
+		"build/./source/main.cpp.o"
+	],
+	"file": "source/main.cpp"
+}]
