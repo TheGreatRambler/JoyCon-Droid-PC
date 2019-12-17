@@ -13,11 +13,13 @@ CXX := x86_64-w64-mingw32-g++
 CFLAGS := -std=gnu11
 # C++ flags
 # Single precision sets all defined floating point numbers to floats, saves on memory
-CXXFLAGS := -std=c++14 -fsingle-precision-constant $(shell pkg-config --cflags sdl2) -I./include
+CXXFLAGS := -std=c++11 -fsingle-precision-constant $(shell pkg-config --cflags sdl2) -I./include
 # C/C++ flags (no -pendantic)
 CPPFLAGS := -g -Wall -Wextra
 # Linker flags (-lpthread needed for threads)
-LDFLAGS := -lpthread $(shell pkg-config --libs sdl2)
+# Include Winsock for getting the IP address
+# Can't use normal pkg config output because we don't want -mswindows
+LDFLAGS := -lpthread -LC:/msys2/mingw64/lib -lmingw32 -lSDL2main -lSDL2 -lws2_32
 
 SRCS := $(shell find $(SRC_DIRS) -name *.cpp -or -name *.c -or -name *.s)
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
