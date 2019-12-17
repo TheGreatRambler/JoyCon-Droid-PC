@@ -9,7 +9,7 @@ SRC_DIRS ?= ./source
 CFLAGS := -std=gnu11
 # C++ flags
 # Single precision sets all defined floating point numbers to floats, saves on memory
-CXXFLAGS := -std=c++11 -fsingle-precision-constant $(shell pkg-config --cflags sdl2)
+CXXFLAGS := -std=c++11 -fsingle-precision-constant $(shell pkg-config --cflags sdl2) -I./include
 # C/C++ flags (no -pendantic)
 CPPFLAGS := -g -Wall -Wextra
 # Linker flags (-lpthread needed for threads)
