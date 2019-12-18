@@ -1,6 +1,7 @@
 #define ASIO_STANDALONE
 #define _WEBSOCKETPP_CPP11_THREAD_
 
+#include "libfort/fort.hpp"
 #include <SDL.h>
 #include <cstdint>
 #include <cstdio>
@@ -11,9 +12,14 @@
 
 #include "getIpAddress.hpp"
 
+SDL_Joystick* joy;
+
 class WebsocketServer {
+private:
+	websocketpp::server<websocketpp::config::asio> m_endpoint;
+
 public:
-	utility_server () {
+	WebsocketServer () {
 		// Set logging settings
 		m_endpoint.set_error_channels (websocketpp::log::elevel::all);
 		m_endpoint.set_access_channels (websocketpp::log::alevel::all ^ websocketpp::log::alevel::frame_payload);
@@ -42,13 +48,9 @@ public:
 		// Start the Asio io_service run loop
 		m_endpoint.run ();
 	}
-
-private:
-	server m_endpoint;
 };
 
-void listJoysticks () {
-	int8_t num_joysticks = SDL_NumJoysticks ();
+void listJoysticks (int8_t num_joysticks) {
 	if (num_joysticks < 0) {
 		printf ("No gamepads were found\n");
 	} else {
@@ -78,30 +80,38 @@ int main (int argc, char* argv[]) {
 			("l,list", "List all connected gamepads");
 		// clang-format on
 		cxxopts::ParseResult commandLineResult = commandLineOptions.parse (argc, argv);
+		int8_t num_joysticks                   = SDL_NumJoysticks ();
 		if (commandLineResult["list"].as<bool> ()) {
 			// List the avaliable gamepads and then exit
-			puts ("Finding gamepads...");
-			listJoysticks ();
+			puts ("Listing gamepads...");
+			listJoysticks (num_joysticks);
 		} else {
 			// Run the normal application
 			puts ("Type the index of the gamepad you wish to use");
-			listJoysticks ();
+			listJoysticks (num_joysticks);
 			std::cout << "Please enter the index: ";
 			std::string index;
 			std::getline (std::cin, index);
-			if (!index.empty ()) {
-				uint8_t chosenIndex = std::stoi (index);
-				printf ("Chosen joystick %d\n", chosenIndex);
+			if (!index.empty) {
+				int8_t chosenIndex = std::stoi (index);
+				if (chosenIndex < num_joysticks && chosenIndex > -1) {
+					printf ("Chosen joystick %d\n", chosenIndex);
 
-				// Get IP data
-				// This is about how large an IP address will ever be
-				char IPAddress[17];
-				GetIP::getMyIP (IPAddress);
-				printf ("Insert this IP address into JoyCon Droid: %s\n", IPAddress);
+					// Open up the Joystick
+					joy = SDL_JoystickOpen (chosenIndex);
 
-				// Open up the websocket server
-				WebsocketServer server;
-				server.run ();
+					// Get IP data
+					// This is about how large an IP address will ever be
+					char IPAddress[17];
+					GetIP::getMyIP (IPAddress);
+					printf ("Insert this IP address into JoyCon Droid: %s\n", IPAddress);
+
+					// Open up the websocket server
+					WebsocketServer server;
+					server.run ();
+				} else {
+					printf ("Index %d is not in the correct bounds\n", chosenIndex);
+				}
 			} else {
 				puts ("Gamepad not chosen, aborting");
 			}
