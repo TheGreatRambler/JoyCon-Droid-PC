@@ -9,18 +9,63 @@
 #include <iostream>
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
+#include <map>
 
 #include "getIpAddress.hpp"
 
 SDL_GameController *joy;
+rapidjson::Document configObject;
+bool usingKeyboard;
 // Random port
 const int port = 9664;
+// Use map to store keycodes TODO
+std::map<SDL_GameControllerButton, SDL_Scancode> keycodeConverter;
 
-void addInput(SDL_GameController *joystick, rapidjson::Writer writer,
+std::string readFile(const std::string fileName)
+{
+	// https://stackoverflow.com/a/43009155
+    std::ifstream ifs(fileName.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
+
+    std::ifstream::pos_type fileSize = ifs.tellg();
+    if (fileSize < 0) {
+	    // Error was encountered
+        return std::string();  
+    }
+    ifs.seekg(0, ios::beg);
+
+    std::vector<char> bytes(fileSize);
+    ifs.read(bytes.data(), fileSize);
+
+    return std::string(bytes.data(), fileSize);
+}
+
+void createKeyConverter() {
+	// Get the JSON 
+	for (auto& m : configObject["keyboardKeys"].GetObject()) {
+		// These match SDL_Keycode
+		int key = (int) m.name.GetString().c_str()[0];
+		SDL_GameControllerButton gamepadKey = SDL_GameControllerGetButtonFromString(m.getString());
+		SDL_Scancode scancode = SDL_GetScancodeFromKey(key);
+		// Add the key to the keyboard mapping
+		keycodeConverter.insert(std::pair<SDL_GameControllerButton, SDL_Scancode>(gamepadKey, scancode));
+	}
+}
+
+void addInput(SDL_GameController *joystick, uint8_t *keyState, rapidjson::Writer writer,
               std::string name, SDL_GameControllerButton buttonType) {
   writer.Key(name);
+if (!usingKeyboard) {
+	// Read the gamepad, normal behavior
   // https://wiki.libsdl.org/SDL_GameControllerGetButton
   writer.Bool(SDL_GameControllerGetButton(joystick, buttonType));
+} else {
+	// The user wants the keyboard, so time to shake things up
+	// Check if the value exists in the map
+	if (keycodeConverter.count(buttonType) == 1) {
+		bool isOn = keyState[keycodeConverter[buttonType]];
+		writer.Bool(isOn);
+	}
+}
 }
 
 std::string constructReturnInputs(SDL_GameController *joystick) {
@@ -37,7 +82,10 @@ std::string constructReturnInputs(SDL_GameController *joystick) {
   // https://wiki.libsdl.org/SDL_GameControllerGetBindForButton
   // https://wiki.libsdl.org/SDL_GameControllerButtonBind
   // And so on
-  addInput(joy, writer, "a", SDL_CONTROLLER_BUTTON_A);
+// Get keyboard state if needed
+	SDL_PumpEvents();
+	const uint8_t *keyState = SDL_GetKeyboardState(NULL);
+  addInput(joy, keyState, writer, "a", SDL_CONTROLLER_BUTTON_A);
   writer.EndObject();
   // JSON ends here
   writer.EndObject();
@@ -101,11 +149,11 @@ public:
 };
 
 void listJoysticks(int8_t num_joysticks) {
-  if (num_joysticks < 0) {
-    printf("No gamepads were found\n");
-  } else {
+  puts("0: Keyboard");
+// I think this handles all cases
+  if (num_joysticks != -1) {
     for (uint8_t i = 0; i < num_joysticks; i++) {
-      printf("%d: %s\n", i, SDL_JoystickNameForIndex(i));
+      printf("%d: %s\n", i + 1, SDL_JoystickNameForIndex(i));
     }
   }
 }
@@ -129,17 +177,23 @@ int main(int argc, char *argv[]) {
     // clang-format off
 		commandLineOptions.add_options ()
 			// https://github.com/jarro2783/cxxopts
-			("l,list", "List all connected gamepads");
+			("l,list", "List all connected gamepads")
+	  		("c,config", "Set the path of the config file");
     // clang-format on
     cxxopts::ParseResult commandLineResult =
         commandLineOptions.parse(argc, argv);
     int8_t num_joysticks = SDL_NumJoysticks();
     if (commandLineResult["list"].as<bool>()) {
       // List the avaliable gamepads and then exit
-      puts("Listing gamepads...");
       listJoysticks(num_joysticks);
     } else {
       // Run the normal application
+	    // Get config data
+	    // count will only be true if the argument exists
+	    std::string configPath = commandLineResult.count("config") == 1 ? commandLineResult["config"].as<std::string>() : "config.json";
+    configObject.Parse(readFile(configPath));
+	    // Set up keyboard mapping
+	    createKeyConverter();
       puts("Type the index of the gamepad you wish to use");
       listJoysticks(num_joysticks);
       std::cout << "Please enter the index: ";
@@ -147,11 +201,18 @@ int main(int argc, char *argv[]) {
       std::getline(std::cin, index);
       if (!index.empty) {
         int8_t chosenIndex = std::stoi(index);
-        if (chosenIndex < num_joysticks && chosenIndex > -1) {
+        if (chosenIndex < num_joysticks + 1 && chosenIndex > -1) {
           printf("Chosen joystick %d\n", chosenIndex);
-
-          // Open up the Joystick
-          joy = SDL_GameControllerOpen(chosenIndex);
+		
+	if (chosenIndex == 0) {
+		// Index 0 is always just the keyboard
+		usingKeyboard = true;
+	} else {
+		// Using a normal gamepad
+		usingKeyboard = false;
+		// Open up the Joystick
+          	joy = SDL_GameControllerOpen(chosenIndex - 1);
+	}
 
           // Get IP data
           // This is about how large an IP address will ever be
@@ -161,6 +222,7 @@ int main(int argc, char *argv[]) {
 
           // Open up the websocket server
           WebsocketServer server;
+	// This will run for as long as needed
           server.run();
         } else {
           printf("Index %d is not in the correct bounds\n", chosenIndex);
