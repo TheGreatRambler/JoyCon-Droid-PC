@@ -6,26 +6,36 @@
 #include <SDL.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cxxopts.hpp>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <rang.hpp>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <signal.h>
 #include <string>
+#include <termcolor.hpp>
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
 
 #include "getIpAddress.hpp"
+#include "sdlGamepadToProcon.hpp"
 
 SDL_GameController* joy;
 rapidjson::Document configObject;
 bool usingKeyboard;
+bool usingLibfort;
 // Random port
 const int port = 9664;
-// Use map to store keycodes TODO
-std::map<SDL_GameControllerButton, SDL_Scancode> keycodeConverter;
+// Use map to store keycodes
+std::map<std::string, SDL_Scancode> keycodeConverter;
+std::map<std::string, SDL_GameControllerButton> gamepadConverter;
+
+// Libfort printer
+fort::char_table libfortPrinter;
 
 std::string readFile (const std::string fileName) {
 	// https://stackoverflow.com/a/43009155
@@ -45,31 +55,28 @@ std::string readFile (const std::string fileName) {
 	return std::string (bytes.data (), fileSize);
 }
 
-void createKeyConverter () {
-	// Get the JSON
-	for (auto& m : configObject["keyboardKeys"].GetObject ()) {
-		// These match SDL_Keycode
-		int key                             = (int)m.name.GetString ()[0];
-		SDL_GameControllerButton gamepadKey = SDL_GameControllerGetButtonFromString (m.value.GetString ());
-		SDL_Scancode scancode               = SDL_GetScancodeFromKey (key);
-		// Add the key to the keyboard mapping
-		keycodeConverter.insert (std::pair<SDL_GameControllerButton, SDL_Scancode> (gamepadKey, scancode));
+void printGamepadButtonNames () {
+	for (auto const& button : gamepadToProcon) {
+		printf ("%s: %s\n", SDL_GameControllerGetStringForButton (button.first), button.second);
 	}
 }
 
-void addInput (SDL_GameController* joystick, const uint8_t* keyState, rapidjson::Writer<rapidjson::StringBuffer>& writer,
-	std::string name, SDL_GameControllerButton buttonType) {
-	writer.Key (name);
-	if (!usingKeyboard) {
-		// Read the gamepad, normal behavior
-		// https://wiki.libsdl.org/SDL_GameControllerGetButton
-		writer.Bool (SDL_GameControllerGetButton (joystick, buttonType));
-	} else {
-		// The user wants the keyboard, so time to shake things up
-		// Check if the value exists in the map
-		if (keycodeConverter.count (buttonType) == 1) {
-			bool isOn = keyState[keycodeConverter[buttonType]];
-			writer.Bool (isOn);
+void createKeyConverter () {
+	// Get the JSON
+	if (configObject.HasMember ("keyboardKeys")) {
+		for (auto& m : configObject["keyboardKeys"].GetObject ()) {
+			// These match SDL_Keycode (SDL_Keycode is just the Ascii code)
+			int key               = (int)m.name.GetString ()[0];
+			SDL_Scancode scancode = SDL_GetScancodeFromKey (key);
+			// Add the key to the keyboard mapping
+			keycodeConverter.insert (std::pair<std::string, SDL_Scancode> (std::string (m.value.GetString ()), scancode));
+		}
+	}
+	if (configObject.HasMember ("gamepadButtons")) {
+		for (auto& m : configObject["gamepadButtons"].GetObject ()) {
+			SDL_GameControllerButton button = SDL_GameControllerGetButtonFromString (m.name.GetString ());
+			// Create the gamepad converter
+			gamepadConverter.insert (std::pair<std::string, SDL_GameControllerButton> (m.value.GetString (), button));
 		}
 	}
 }
@@ -91,7 +98,26 @@ std::string constructReturnInputs (SDL_GameController* joystick) {
 	// Get keyboard state if needed
 	SDL_PumpEvents ();
 	const uint8_t* keyState = SDL_GetKeyboardState (NULL);
-	addInput (joy, keyState, writer, "a", SDL_CONTROLLER_BUTTON_A);
+	for (auto const& button : gamepadToProcon) {
+		writer.Key (button.second);
+		if (usingKeyboard) {
+			// Get the value from SDL
+			if (gamepadConverter.count (button.second)) {
+				writer.Bool (SDL_GameControllerGetButton (joystick, gamepadConverter[button.second]));
+			} else {
+				writer.Bool (SDL_GameControllerGetButton (joystick, button.first));
+			}
+		} else {
+			if (keycodeConverter.count (button.second)) {
+				// This button is remapped
+				bool isOn = keyState[keycodeConverter[button.second]];
+				writer.Bool (isOn);
+			} else {
+				// Always off
+				writer.Bool (false);
+			}
+		}
+	}
 	// Buttons end here
 	writer.EndObject ();
 	// JSON ends here
@@ -154,20 +180,49 @@ public:
 };
 
 void listJoysticks (int8_t num_joysticks) {
-	puts ("0: Keyboard");
+	if (usingLibfort) {
+		// clang-format off
+		libfortPrinter << fort::header
+			<< "Index" << "Controller" << "GUID" << fort::endr
+			<< "0" << "Keyboard" << "" << fort::endr;
+		// clang-format on
+	} else {
+		puts ("0: Keyboard");
+	}
 	// I think this handles all cases
 	if (num_joysticks != -1) {
 		for (uint8_t i = 0; i < num_joysticks; i++) {
-			printf ("%d: %s\n", i + 1, SDL_JoystickNameForIndex (i));
+			SDL_GameController* tempJoy;
+			tempJoy = SDL_GameControllerOpen (i);
+			char guid[40];
+			SDL_JoystickGetGUIDString (SDL_JoystickGetGUID (SDL_GameControllerGetJoystick (tempJoy)), guid, 40);
+			if (usingLibfort) {
+				libfortPrinter << std::to_string (i + 1) << SDL_JoystickNameForIndex (i) << guid << fort::endr;
+			} else {
+				printf ("%d: %s %s\n", i + 1, SDL_JoystickNameForIndex (i), guid);
+			}
+			// No longer needed
+			SDL_GameControllerClose (tempJoy);
 		}
+	}
+
+	if (usingLibfort) {
+		std::cout << libfortPrinter.to_string () << std::endl;
 	}
 }
 
 int main (int argc, char* argv[]) {
-	puts ("Starting up SDL2...");
 	// SDL2 will only report events when the window has focus, so set
 	// this hint as we don't have a window
 	SDL_SetHint (SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+
+	// Quit on Ctrl + C, VERY IMPORTANT
+	signal (SIGINT, [] (int s) {
+		exit (1);
+	});
+
+	// Set libfort printing method
+	libfortPrinter.set_border_style (FT_BASIC_STYLE);
 
 	// FIXME: We don't need video, but without it SDL will fail to work in
 	// SDL_WaitEvent()
@@ -182,11 +237,17 @@ int main (int argc, char* argv[]) {
 		commandLineOptions.add_options ()
 			// https://github.com/jarro2783/cxxopts
 			("l,list", "List all connected gamepads")
+			("b,buttons", "Print the names of gamepad keys to use in config.json")
+			("p,plain", "Disable fancy tables and coloring")
 	  		("c,config", "Set the path of the config file");
 		// clang-format on
 		cxxopts::ParseResult commandLineResult = commandLineOptions.parse (argc, argv);
 		int8_t num_joysticks                   = SDL_NumJoysticks ();
-		if (commandLineResult["list"].as<bool> ()) {
+		usingLibfort                           = commandLineResult["fancy"].as<bool> ();
+		if (commandLineResult["buttons"].as<bool> ()) {
+			// Print the buttons then exit
+			printGamepadButtonNames ();
+		} else if (commandLineResult["list"].as<bool> ()) {
 			// List the avaliable gamepads and then exit
 			listJoysticks (num_joysticks);
 		} else {
@@ -216,6 +277,11 @@ int main (int argc, char* argv[]) {
 						// Open up the Joystick
 						joy = SDL_GameControllerOpen (chosenIndex - 1);
 					}
+
+// Windows Defender is gonna pop up here
+#ifdef _WIN32
+					puts ("Please allow the Windows Defender popup to access your private and public network, if applicable");
+#endif
 
 					// Get IP data
 					// This is about how large an IP address will ever be
