@@ -3,9 +3,7 @@
 #define RAPIDJSON_HAS_STDSTRING 1
 
 #include "libfort/fort.hpp"
-extern "C" {
 #include <SDL.h>
-}
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +29,7 @@ extern "C" {
 SDL_GameController* joy;
 rapidjson::Document configObject;
 bool usingKeyboard;
+bool usingInputsDisplay;
 bool usingFancy;
 std::thread* inputPrintingThread;
 TerminalHelpers::TerminalSize terminalSize;
@@ -45,6 +44,8 @@ std::map<SDL_GameControllerButton, std::string> gamepadConverterReverse;
 
 // Libfort printer
 fort::char_table libfortPrinter;
+// For the input display
+fort::char_table inputDisplay;
 
 std::string readFile(const std::string fileName) {
 	// https://stackoverflow.com/a/43009155
@@ -70,30 +71,81 @@ void printGamepadButtonNames() {
 	}
 }
 
+void printInputsTable() {
+	// Approximate location
+	TerminalHelpers::goToLocation(3, terminalSize.y - InputLocationsHeight * 2 - 2);
+	std::istringstream iss(inputDisplay.to_string());
+	for(std::string line; std::getline(iss, line);) {
+		std::cout << line;
+		TerminalHelpers::incrementLine();
+	}
+}
+
 void printInputDataFancy() {
 	SDL_Event event;
 	while(SDL_PollEvent(&event) && !shouldStop) {
-		uint32_t type = event.type;
+		uint32_t type         = event.type;
+		bool somethingChanged = false;
 
 		// TODO handle drawing here
+		Loc inputLoc;
+		std::string inputName;
 		if(usingKeyboard) {
 			// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinputkeyboard.html
 			// Check for keyboard events
 			if(type == SDL_KEYDOWN) {
 				// Need to draw something
+				somethingChanged                     = true;
+				inputName                            = keycodeConverterReverse[event.key.keysym.scancode];
+				inputLoc                             = inputLocations[inputName];
+				inputDisplay[inputLoc.y][inputLoc.x] = inputName;
 			} else if(type == SDL_KEYUP) {
 				// Need to erase something
+				somethingChanged = true;
+				inputName        = keycodeConverterReverse[event.key.keysym.scancode];
+				inputLoc         = inputLocations[inputName];
+				// Empty it
+				inputDisplay[inputLoc.y][inputLoc.x] = "";
 			}
 		} else {
 			// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinput.html
 			// Check for gamepad events
 			if(type == SDL_JOYBUTTONDOWN) {
 				// Need to draw something
+				somethingChanged                     = true;
+				inputName                            = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
+				inputLoc                             = inputLocations[inputName];
+				inputDisplay[inputLoc.y][inputLoc.x] = inputName;
 			} else if(type == SDL_JOYBUTTONDOWN) {
 				// Need to erase something
+				somethingChanged = true;
+				inputName        = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
+				inputLoc         = inputLocations[inputName];
+				// Empty it
+				inputDisplay[inputLoc.y][inputLoc.x] = "";
+			}
+		}
+
+		if(somethingChanged) {
+			// Redraw table now
+			if(usingFancy) {
+				printInputsTable();
 			}
 		}
 	}
+}
+
+void setUpInputFancyViewer() {
+	for(uint8_t i = 0; i < InputLocationsHeight; i++) {
+		inputDisplay.row(i).set_cell_text_align(fort::text_align::center);
+		inputDisplay.row(i).set_cell_min_width(InputLocationsLargestString);
+		for(uint8_t j = 0; j < InputLocationsWidth; j++) {
+			inputDisplay[i][j] = "";
+		}
+	}
+	inputDisplay.set_border_style(FT_BASIC_STYLE);
+	// Print it while it's empty
+	printInputsTable();
 }
 
 void createKeyConverter() {
@@ -162,6 +214,42 @@ std::string constructReturnInputs(SDL_GameController* joystick) {
 	return s.GetString();
 }
 
+void listJoysticks(int8_t num_joysticks) {
+	if(usingFancy) {
+		// clang-format off
+		libfortPrinter << fort::header
+			<< "Index" << "Controller" << "GUID" << fort::endr
+			<< "0" << "Keyboard" << "" << fort::endr;
+		// clang-format on
+	} else {
+		puts("0: Keyboard");
+	}
+	// I think this handles all cases
+	if(num_joysticks != -1) {
+		for(uint8_t i = 0; i < num_joysticks; i++) {
+			SDL_GameController* tempJoy;
+			tempJoy = SDL_GameControllerOpen(i);
+			char guid[40];
+			SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(tempJoy)), guid, 40);
+			if(usingFancy) {
+				libfortPrinter << std::to_string(i + 1) << SDL_JoystickNameForIndex(i) << guid << fort::endr;
+			} else {
+				printf("%d: %s %s\n", i + 1, SDL_JoystickNameForIndex(i), guid);
+			}
+			// No longer needed
+			SDL_GameControllerClose(tempJoy);
+		}
+	}
+	if(usingFancy) {
+		TerminalHelpers::goToLocation(3, 4);
+		std::istringstream iss(libfortPrinter.to_string());
+		for(std::string line; std::getline(iss, line);) {
+			std::cout << line;
+			TerminalHelpers::incrementLine();
+		}
+	}
+}
+
 class WebsocketServer {
 private:
 	websocketpp::server<websocketpp::config::asio> m_endpoint;
@@ -214,43 +302,16 @@ public:
 		// Start the Asio io_service run loop
 		m_endpoint.run();
 	}
+
+	void closeEverything() {
+		// Close it up cleanly
+		m_endpoint.stop_listening();
+		m_endpoint.close();
+	}
 };
 
-void listJoysticks(int8_t num_joysticks) {
-	if(usingFancy) {
-		// clang-format off
-		libfortPrinter << fort::header
-			<< "Index" << "Controller" << "GUID" << fort::endr
-			<< "0" << "Keyboard" << "" << fort::endr;
-		// clang-format on
-	} else {
-		puts("0: Keyboard");
-	}
-	// I think this handles all cases
-	if(num_joysticks != -1) {
-		for(uint8_t i = 0; i < num_joysticks; i++) {
-			SDL_GameController* tempJoy;
-			tempJoy = SDL_GameControllerOpen(i);
-			char guid[40];
-			SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(tempJoy)), guid, 40);
-			if(usingFancy) {
-				libfortPrinter << std::to_string(i + 1) << SDL_JoystickNameForIndex(i) << guid << fort::endr;
-			} else {
-				printf("%d: %s %s\n", i + 1, SDL_JoystickNameForIndex(i), guid);
-			}
-			// No longer needed
-			SDL_GameControllerClose(tempJoy);
-		}
-	}
-	if(usingFancy) {
-		TerminalHelpers::goToLocation(3, 4);
-		std::istringstream iss(libfortPrinter.to_string());
-		for(std::string line; std::getline(iss, line);) {
-			std::cout << line;
-			TerminalHelpers::incrementLine();
-		}
-	}
-}
+// This needs to be defined
+WebsocketServer* serverInstance;
 
 int main(int argc, char* argv[]) {
 	// SDL2 will only report events when the window has focus, so set
@@ -261,7 +322,17 @@ int main(int argc, char* argv[]) {
 	signal(SIGINT, [](int s) {
 		shouldStop = true;
 		// Wait for it to end
-		inputPrintingThread->join();
+		if(inputPrintingThread) {
+			inputPrintingThread->join();
+			// Remove memory
+			delete inputPrintingThread;
+		}
+		if(serverInstance) {
+			// Close everything and wait till they are done
+			serverInstance->closeEverything();
+			// I dunno if this is good, but whatever
+			delete serverInstance;
+		}
 		exit(1);
 	});
 
@@ -282,11 +353,13 @@ int main(int argc, char* argv[]) {
 			("l,list", "List all connected gamepads")
 			("b,buttons", "Print the names of gamepad keys to use in config.json")
 			("f,fancy", "Use an extra fancy UI")
+			("i,inputs", "Display inputs in real time, requires fancy UI")
 	  		("c,config", "Set the path of the config file");
 		// clang-format on
 		cxxopts::ParseResult commandLineResult = commandLineOptions.parse(argc, argv);
 		int8_t num_joysticks                   = SDL_NumJoysticks();
 		usingFancy                             = commandLineResult.count("fancy") == 1;
+		usingInputsDisplay                     = commandLineResult.count("inputs") == 1;
 		if(usingFancy) {
 			puts("Using fancy UI");
 			// Use fancy method of displaying text
@@ -308,7 +381,7 @@ int main(int argc, char* argv[]) {
 			configObject.Parse(readFile(configPath).c_str());
 			// Set up keyboard mapping
 			createKeyConverter();
-			TerminalHelpers::incrementLineLarge();
+			TerminalHelpers::goToLocation(3, 3);
 			puts("Type the index of the gamepad you wish to use");
 			listJoysticks(num_joysticks);
 			std::cout << "Please enter the index: ";
@@ -349,16 +422,17 @@ int main(int argc, char* argv[]) {
 
 					// Handle gamepad and keyboard updating, not because it is needed to update values, but only to display
 					// Run this in a thread
-					if(usingFancy) {
+					if(usingFancy && usingInputsDisplay) {
 						// Start thread
+						setUpInputFancyViewer();
 						// Create from thread so it can be global
 						inputPrintingThread = new std::thread(printInputDataFancy);
 					}
 
 					// Open up the websocket server
-					WebsocketServer server;
+					serverInstance = new WebsocketServer();
 					// This will run for as long as needed
-					server.run();
+					serverInstance->run();
 				} else {
 					TerminalHelpers::incrementLineLarge();
 					printf("Index %d is not in the correct bounds\n", chosenIndex);
