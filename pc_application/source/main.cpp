@@ -19,27 +19,26 @@
 #include <string>
 #include <termcolor.hpp>
 #include <thread>
-#include <websocketpp/config/asio_no_tls.hpp>
-#include <websocketpp/server.hpp>
 
 #include "getIpAddress.hpp"
 #include "sdlGamepadToProcon.hpp"
 #include "terminalhelpers.hpp"
 
+// This needs to be defined
+WebsocketServer serverInstance;
 SDL_GameController* joy;
 rapidjson::Document configObject;
 bool usingKeyboard;
 bool usingInputsDisplay;
 bool usingFancy;
-std::thread* inputPrintingThread;
+std::thread* inputHandlingThread;
 TerminalHelpers::TerminalSize terminalSize;
 // Random port
 const int port  = 9664;
 bool shouldStop = false;
 // Use map to store keycodes
-std::map<std::string, SDL_Scancode> keycodeConverter;
+// Despite the names, these are the only converters
 std::map<SDL_Scancode, std::string> keycodeConverterReverse;
-std::map<std::string, SDL_GameControllerButton> gamepadConverter;
 std::map<SDL_GameControllerButton, std::string> gamepadConverterReverse;
 
 // Libfort printer
@@ -81,7 +80,7 @@ void printInputsTable() {
 	}
 }
 
-void printInputDataFancy() {
+void inputHandlingFunction() {
 	SDL_Event event;
 	while(SDL_PollEvent(&event) && !shouldStop) {
 		uint32_t type         = event.type;
@@ -89,44 +88,59 @@ void printInputDataFancy() {
 
 		// TODO handle drawing here
 		Loc inputLoc;
+		bool newState;
 		std::string inputName;
 		if(usingKeyboard) {
 			// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinputkeyboard.html
 			// Check for keyboard events
 			if(type == SDL_KEYDOWN) {
 				// Need to draw something
-				somethingChanged                     = true;
-				inputName                            = keycodeConverterReverse[event.key.keysym.scancode];
-				inputLoc                             = inputLocations[inputName];
-				inputDisplay[inputLoc.y][inputLoc.x] = inputName;
+				somethingChanged = true;
+				inputName        = keycodeConverterReverse[event.key.keysym.scancode];
+				newState         = true;
+				if(usingFancy) {
+					inputLoc                             = inputLocations[inputName];
+					inputDisplay[inputLoc.y][inputLoc.x] = inputName;
+				}
 			} else if(type == SDL_KEYUP) {
 				// Need to erase something
 				somethingChanged = true;
 				inputName        = keycodeConverterReverse[event.key.keysym.scancode];
-				inputLoc         = inputLocations[inputName];
-				// Empty it
-				inputDisplay[inputLoc.y][inputLoc.x] = "";
+				newState         = false;
+				if(usingFancy) {
+					inputLoc = inputLocations[inputName];
+					// Empty it
+					inputDisplay[inputLoc.y][inputLoc.x] = "";
+				}
 			}
 		} else {
 			// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinput.html
 			// Check for gamepad events
 			if(type == SDL_JOYBUTTONDOWN) {
 				// Need to draw something
-				somethingChanged                     = true;
-				inputName                            = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
-				inputLoc                             = inputLocations[inputName];
-				inputDisplay[inputLoc.y][inputLoc.x] = inputName;
+				somethingChanged = true;
+				inputName        = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
+				newState         = true;
+				if(usingFancy) {
+					inputLoc                             = inputLocations[inputName];
+					inputDisplay[inputLoc.y][inputLoc.x] = inputName;
+				}
 			} else if(type == SDL_JOYBUTTONDOWN) {
 				// Need to erase something
 				somethingChanged = true;
 				inputName        = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
-				inputLoc         = inputLocations[inputName];
-				// Empty it
-				inputDisplay[inputLoc.y][inputLoc.x] = "";
+				newState         = false;
+				if(usingFancy) {
+					inputLoc = inputLocations[inputName];
+					// Empty it
+					inputDisplay[inputLoc.y][inputLoc.x] = "";
+				}
 			}
 		}
 
 		if(somethingChanged) {
+			// Send inputs over websocket
+			serverInstance.sendGamepadButtonData(inputName, newState);
 			// Redraw table now
 			if(usingFancy) {
 				printInputsTable();
@@ -156,7 +170,6 @@ void createKeyConverter() {
 			int key               = (int)m.name.GetString()[0];
 			SDL_Scancode scancode = SDL_GetScancodeFromKey(key);
 			// Add the key to the keyboard mapping
-			keycodeConverter.insert(std::pair<std::string, SDL_Scancode>(std::string(m.value.GetString()), scancode));
 			keycodeConverterReverse.insert(std::pair<SDL_Scancode, std::string>(scancode, std::string(m.value.GetString())));
 		}
 	}
@@ -164,54 +177,9 @@ void createKeyConverter() {
 		for(auto& m : configObject["gamepadButtons"].GetObjectA()) {
 			SDL_GameControllerButton button = SDL_GameControllerGetButtonFromString(m.name.GetString());
 			// Create the gamepad converter
-			gamepadConverter.insert(std::pair<std::string, SDL_GameControllerButton>(m.value.GetString(), button));
 			gamepadConverterReverse.insert(std::pair<SDL_GameControllerButton, std::string>(button, m.value.GetString()));
 		}
 	}
-}
-
-std::string constructReturnInputs(SDL_GameController* joystick) {
-	rapidjson::StringBuffer s;
-	rapidjson::Writer<rapidjson::StringBuffer> writer(s);
-	// Get data from SDL and write it to the output data
-	// Set the flag to be return data
-	// JSON starts here
-	writer.StartObject();
-	// Button data
-	writer.Key("buttons");
-	writer.StartObject();
-	// https://wiki.libsdl.org/SDL_GameControllerButton
-	// https://wiki.libsdl.org/SDL_GameControllerGetBindForButton
-	// https://wiki.libsdl.org/SDL_GameControllerButtonBind
-	// And so on
-	// Get keyboard state if needed
-	SDL_PumpEvents();
-	const uint8_t* keyState = SDL_GetKeyboardState(NULL);
-	for(auto const& button : gamepadToProcon) {
-		writer.Key(button.second);
-		if(usingKeyboard) {
-			// Get the value from SDL
-			if(gamepadConverter.count(button.second)) {
-				writer.Bool(SDL_GameControllerGetButton(joystick, gamepadConverter[button.second]));
-			} else {
-				writer.Bool(SDL_GameControllerGetButton(joystick, button.first));
-			}
-		} else {
-			if(keycodeConverter.count(button.second)) {
-				// This button is remapped
-				bool isOn = keyState[keycodeConverter[button.second]];
-				writer.Bool(isOn);
-			} else {
-				// Always off
-				writer.Bool(false);
-			}
-		}
-	}
-	// Buttons end here
-	writer.EndObject();
-	// JSON ends here
-	writer.EndObject();
-	return s.GetString();
 }
 
 void listJoysticks(int8_t num_joysticks) {
@@ -245,73 +213,11 @@ void listJoysticks(int8_t num_joysticks) {
 		std::istringstream iss(libfortPrinter.to_string());
 		for(std::string line; std::getline(iss, line);) {
 			std::cout << line;
+			// This is used to preserve the column
 			TerminalHelpers::incrementLine();
 		}
 	}
 }
-
-class WebsocketServer {
-private:
-	websocketpp::server<websocketpp::config::asio> m_endpoint;
-
-public:
-	WebsocketServer() {
-		// Set logging settings
-		m_endpoint.set_error_channels(websocketpp::log::elevel::all);
-		m_endpoint.set_access_channels(websocketpp::log::alevel::all ^ websocketpp::log::alevel::frame_payload);
-
-		// Initialize Asio
-		m_endpoint.init_asio();
-
-		// Set the default message handler to the echo handler
-		m_endpoint.set_message_handler(websocketpp::lib::bind(&WebsocketServer::messageHandler, this, std::placeholders::_1, std::placeholders::_2));
-
-		m_endpoint.set_open_handler(websocketpp::lib::bind(&WebsocketServer::openHandler, this, std::placeholders::_1));
-	}
-
-	void messageHandler(websocketpp::connection_hdl hdl, websocketpp::server<websocketpp::config::asio>::message_ptr msg) {
-		rapidjson::Document d;
-		rapidjson::Document returnJson;
-		d.Parse(msg->get_payload().c_str());
-		std::string flagRecieved = d["flag"].GetString();
-		if(flagRecieved == "frame") {
-			SDL_GameControllerUpdate();
-			// The endpoint wants the next frame, send it as json
-			returnJson["flag"] = "frameInput";
-			rapidjson::Value inputs(constructReturnInputs(joy), d.GetAllocator());
-			returnJson["data"] = inputs;
-		}
-		rapidjson::StringBuffer buffer;
-		rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-		returnJson.Accept(writer);
-		// Send the JSON data
-		m_endpoint.send(hdl, buffer.GetString(), websocketpp::frame::opcode::text);
-	}
-
-	void openHandler(websocketpp::connection_hdl hdl) {
-		// Do something now that a new connection has opened
-	}
-
-	void run() {
-		// Listen on port specified earlier
-		m_endpoint.listen(port);
-
-		// Queues a connection accept operation
-		m_endpoint.start_accept();
-
-		// Start the Asio io_service run loop
-		m_endpoint.run();
-	}
-
-	void closeEverything() {
-		// Close it up cleanly
-		m_endpoint.stop_listening();
-		m_endpoint.close();
-	}
-};
-
-// This needs to be defined
-WebsocketServer* serverInstance;
 
 int main(int argc, char* argv[]) {
 	// SDL2 will only report events when the window has focus, so set
@@ -393,9 +299,7 @@ int main(int argc, char* argv[]) {
 					TerminalHelpers::incrementLineLarge();
 					printf("Chosen joystick %d\n", chosenIndex);
 
-					if(usingFancy) {
-						SDL_JoystickEventState(SDL_ENABLE);
-					}
+					SDL_JoystickEventState(SDL_ENABLE);
 
 					if(chosenIndex == 0) {
 						// Index 0 is always just the keyboard
@@ -420,19 +324,16 @@ int main(int argc, char* argv[]) {
 					TerminalHelpers::incrementLineLarge();
 					printf("Insert this IP address into JoyCon Droid: %s\n", IPAddress);
 
-					// Handle gamepad and keyboard updating, not because it is needed to update values, but only to display
+					// Handle gamepad and keyboard updating, both to update and display
 					// Run this in a thread
-					if(usingFancy && usingInputsDisplay) {
-						// Start thread
-						setUpInputFancyViewer();
-						// Create from thread so it can be global
-						inputPrintingThread = new std::thread(printInputDataFancy);
-					}
 
-					// Open up the websocket server
-					serverInstance = new WebsocketServer();
 					// This will run for as long as needed
-					serverInstance->run();
+					// The idea is that this doesn't block
+					serverInstance.run(port);
+					// Start thread
+					setUpInputFancyViewer();
+					// Create from thread so it can be global
+					inputHandlingThread = new std::thread(inputHandlingFunction);
 				} else {
 					TerminalHelpers::incrementLineLarge();
 					printf("Index %d is not in the correct bounds\n", chosenIndex);
