@@ -1,5 +1,8 @@
 #pragma once
 
+#define ASIO_STANDALONE
+#define _WEBSOCKETPP_CPP11_THREAD_
+
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -12,7 +15,7 @@ private:
 	websocketpp::connection_hdl mainHdl;
 	bool haveMainHDL;
 
-	void sendJSON(websocketpp::connection_hdl hdl, rapidjson::Document d) {
+	void sendJSON(websocketpp::connection_hdl hdl, rapidjson::Document& d) {
 		rapidjson::StringBuffer buffer;
 		rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
 		d.Accept(writer);
@@ -60,7 +63,7 @@ public:
 		if(haveMainHDL) {
 			rapidjson::Document returnJson;
 			returnJson["flag"] = "button";
-			rapidjson::Value button(inputName, returnJson.GetAllocator());
+			rapidjson::Value button(inputName.c_str(), returnJson.GetAllocator());
 			returnJson["button"] = button;
 			returnJson["state"]  = state;
 			// Send back this button data
@@ -74,14 +77,19 @@ public:
 
 		// Queues a connection accept operation
 		m_endpoint.start_accept();
+		// Start the Asio io_service run loop
+		// This will block till done
+		m_endpoint.run();
 	}
 
 	void closeEverything() {
 		// Close it up cleanly
 		m_endpoint.stop_listening();
-		// Start the Asio io_service run loop
-		// This will block till done
-		m_endpoint.run();
-		m_endpoint.close();
+		websocketpp::lib::error_code ec;
+		// There should only be one connection, mainHdl
+		m_endpoint.close(mainHdl, websocketpp::close::status::going_away, "", ec);
+		if(ec) {
+			std::cout << "> Error closing connection " << ec.message() << std::endl;
+		}
 	}
 };
