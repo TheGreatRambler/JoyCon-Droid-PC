@@ -31,14 +31,8 @@ rapidjson::Document configObject;
 bool usingKeyboard;
 bool usingInputsDisplay;
 bool usingFancy;
-bool startEventLoop = false;
 
-std::thread* inputHandlingThread;
 std::thread* websocketServerThread;
-
-// To sync up the controller handling code with the main thread
-std::condition_variable conditionInputHandling;
-std::mutex mutexInputHandling;
 
 TerminalHelpers::TerminalSize terminalSize;
 // Random port
@@ -90,84 +84,72 @@ void printInputsTable() {
 }
 
 void inputHandlingFunction() {
-	// Have to init here
-	if(SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0) {
-		fprintf(stderr, "Unable to init SDL: %s\n", SDL_GetError());
-		exit(1);
-	} else {
+	puts("Starting input handling");
+	SDL_Event event;
+	while(SDL_PollEvent(&event) && !shouldStop) {
+		uint32_t type         = event.type;
+		bool somethingChanged = false;
 
-		// Wait to start
-		std::unique_lock<std::mutex> lk(mutexInputHandling);
-		// This will block until it is supposed to start
-		conditionInputHandling.wait(lk, [] { return startEventLoop || shouldStop; });
-
-		puts("Starting input handling");
-		SDL_Event event;
-		while(SDL_PollEvent(&event) && !shouldStop) {
-			uint32_t type         = event.type;
-			bool somethingChanged = false;
-
-			// TODO handle drawing here
-			Loc inputLoc;
-			bool newState;
-			std::string inputName;
-			if(usingKeyboard) {
-				puts("accepting inputs");
-				// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinputkeyboard.html
-				// Check for keyboard events
-				if(type == SDL_KEYDOWN) {
-					// Need to draw something
-					somethingChanged = true;
-					inputName        = keycodeConverterReverse[event.key.keysym.scancode];
-					newState         = true;
-					if(usingFancy) {
-						inputLoc                             = inputLocations[inputName];
-						inputDisplay[inputLoc.y][inputLoc.x] = inputName;
-					}
-				} else if(type == SDL_KEYUP) {
-					// Need to erase something
-					somethingChanged = true;
-					inputName        = keycodeConverterReverse[event.key.keysym.scancode];
-					newState         = false;
-					if(usingFancy) {
-						inputLoc = inputLocations[inputName];
-						// Empty it
-						inputDisplay[inputLoc.y][inputLoc.x] = "";
-					}
+		// TODO handle drawing here
+		Loc inputLoc;
+		bool newState;
+		std::string inputName;
+		if(usingKeyboard) {
+			puts("accepting inputs");
+			// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinputkeyboard.html
+			// Check for keyboard events
+			if(type == SDL_KEYDOWN) {
+				// Need to draw something
+				somethingChanged = true;
+				inputName        = keycodeConverterReverse[event.key.keysym.scancode];
+				newState         = true;
+				if(usingFancy) {
+					inputLoc                             = inputLocations[inputName];
+					inputDisplay[inputLoc.y][inputLoc.x] = inputName;
 				}
-			} else {
-				// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinput.html
-				// Check for gamepad events
-				if(type == SDL_JOYBUTTONDOWN) {
-					// Need to draw something
-					somethingChanged = true;
-					inputName        = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
-					newState         = true;
-					if(usingFancy) {
-						inputLoc                             = inputLocations[inputName];
-						inputDisplay[inputLoc.y][inputLoc.x] = inputName;
-					}
-				} else if(type == SDL_JOYBUTTONDOWN) {
-					// Need to erase something
-					somethingChanged = true;
-					inputName        = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
-					newState         = false;
-					if(usingFancy) {
-						inputLoc = inputLocations[inputName];
-						// Empty it
-						inputDisplay[inputLoc.y][inputLoc.x] = "";
-					}
+			} else if(type == SDL_KEYUP) {
+				// Need to erase something
+				somethingChanged = true;
+				inputName        = keycodeConverterReverse[event.key.keysym.scancode];
+				newState         = false;
+				if(usingFancy) {
+					inputLoc = inputLocations[inputName];
+					// Empty it
+					inputDisplay[inputLoc.y][inputLoc.x] = "";
 				}
 			}
-
-			if(somethingChanged) {
-				puts(inputName.c_str());
-				// Send inputs over websocket
-				serverInstance.sendGamepadButtonData(inputName, newState);
-				// Redraw table now
+		} else {
+			// https://www.libsdl.org/release/SDL-1.2.15/docs/html/guideinput.html
+			// Check for gamepad events
+			if(type == SDL_JOYBUTTONDOWN) {
+				// Need to draw something
+				somethingChanged = true;
+				inputName        = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
+				newState         = true;
 				if(usingFancy) {
-					printInputsTable();
+					inputLoc                             = inputLocations[inputName];
+					inputDisplay[inputLoc.y][inputLoc.x] = inputName;
 				}
+			} else if(type == SDL_JOYBUTTONDOWN) {
+				// Need to erase something
+				somethingChanged = true;
+				inputName        = gamepadConverterReverse[(SDL_GameControllerButton)event.cbutton.button];
+				newState         = false;
+				if(usingFancy) {
+					inputLoc = inputLocations[inputName];
+					// Empty it
+					inputDisplay[inputLoc.y][inputLoc.x] = "";
+				}
+			}
+		}
+
+		if(somethingChanged) {
+			puts(inputName.c_str());
+			// Send inputs over websocket
+			serverInstance.sendGamepadButtonData(inputName, newState);
+			// Redraw table now
+			if(usingFancy) {
+				printInputsTable();
 			}
 		}
 	}
@@ -257,30 +239,26 @@ int main(int argc, char* argv[]) {
 	signal(SIGINT, [](int s) {
 		shouldStop = true;
 		// Wait for it to end
-		if(inputHandlingThread) {
-			inputHandlingThread->join();
-			// Remove memory (dunno if this is safe)
-			delete inputHandlingThread;
-		}
 		if(websocketServerThread) {
 			// Calling this from another thread, so there might be race conditions
 			serverInstance.closeEverything();
 			websocketServerThread->join();
-			// Remove memory (dunno if this is safe)
-			delete websocketServerThread;
 		}
 		exit(1);
 	});
+	if(SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0) {
+		fprintf(stderr, "Unable to init SDL: %s\n", SDL_GetError());
+		exit(1);
+	} else {
 
-	// Set libfort printing method
-	libfortPrinter.set_border_style(FT_BASIC_STYLE);
+		// Set libfort printing method
+		libfortPrinter.set_border_style(FT_BASIC_STYLE);
 
-	// FIXME: We don't need video, but without it SDL will fail to work in
-	// SDL_WaitEvent()
-	inputHandlingThread = new std::thread(inputHandlingFunction);
-	atexit(SDL_Quit);
-	cxxopts::Options commandLineOptions("JoyCon Droid PC", "Use PC gamepads with JoyCon Droid");
-	// clang-format off
+		// FIXME: We don't need video, but without it SDL will fail to work in
+		// SDL_WaitEvent()
+		atexit(SDL_Quit);
+		cxxopts::Options commandLineOptions("JoyCon Droid PC", "Use PC gamepads with JoyCon Droid");
+		// clang-format off
 		commandLineOptions.add_options ()
 			// https://github.com/jarro2783/cxxopts
 			("l,list", "List all connected gamepads")
@@ -288,95 +266,108 @@ int main(int argc, char* argv[]) {
 			("f,fancy", "Use an extra fancy UI")
 			("i,inputs", "Display inputs in real time, requires fancy UI")
 	  		("c,config", "Set the path of the config file");
-	// clang-format on
-	cxxopts::ParseResult commandLineResult = commandLineOptions.parse(argc, argv);
-	int8_t num_joysticks                   = SDL_NumJoysticks();
-	usingFancy                             = commandLineResult.count("fancy") == 1;
-	usingInputsDisplay                     = commandLineResult.count("inputs") == 1;
-	if(usingFancy) {
-		puts("Using fancy UI");
-		// Use fancy method of displaying text
-		terminalSize = TerminalHelpers::getTerminalDimensions();
-		// Clear screen for the next stuff
-		TerminalHelpers::clearScreen();
-	}
-	if(commandLineResult["buttons"].as<bool>()) {
-		// Print the buttons then exit
-		printGamepadButtonNames();
-	} else if(commandLineResult["list"].as<bool>()) {
-		// List the avaliable gamepads and then exit
-		listJoysticks(num_joysticks);
-	} else {
-		// Run the normal application
-		// Get config data
-		// count will only be true if the argument exists
-		std::string configPath = commandLineResult.count("config") == 1 ? commandLineResult["config"].as<std::string>() : "config.json";
-		configObject.Parse(readFile(configPath).c_str());
-		// Set up keyboard mapping
-		createKeyConverter();
-		TerminalHelpers::goToLocation(3, 3);
-		puts("Type the index of the gamepad you wish to use");
-		listJoysticks(num_joysticks);
-		std::cout << "Please enter the index: ";
-		std::string index;
-		std::getline(std::cin, index);
-		if(!index.empty()) {
-			int8_t chosenIndex = std::stoi(index);
-			if(chosenIndex < num_joysticks + 1 && chosenIndex > -1) {
-				TerminalHelpers::incrementLineLarge();
-				printf("Chosen joystick %d\n", chosenIndex);
+		// clang-format on
+		cxxopts::ParseResult commandLineResult = commandLineOptions.parse(argc, argv);
+		int8_t num_joysticks                   = SDL_NumJoysticks();
+		usingFancy                             = commandLineResult.count("fancy") == 1;
+		usingInputsDisplay                     = commandLineResult.count("inputs") == 1;
+		if(usingFancy) {
+			puts("Using fancy UI");
+			// Use fancy method of displaying text
+			terminalSize = TerminalHelpers::getTerminalDimensions();
+			// Clear screen for the next stuff
+			TerminalHelpers::clearScreen();
+		}
+		if(commandLineResult["buttons"].as<bool>()) {
+			// Print the buttons then exit
+			printGamepadButtonNames();
+		} else if(commandLineResult["list"].as<bool>()) {
+			// List the avaliable gamepads and then exit
+			listJoysticks(num_joysticks);
+		} else {
+			// Run the normal application
+			// Get config data
+			// count will only be true if the argument exists
+			std::string configPath = commandLineResult.count("config") == 1 ? commandLineResult["config"].as<std::string>() : "config.json";
+			configObject.Parse(readFile(configPath).c_str());
+			// Set up keyboard mapping
+			createKeyConverter();
+			if(usingFancy) {
+				TerminalHelpers::goToLocation(3, 3);
+			}
+			puts("Type the index of the gamepad you wish to use");
+			listJoysticks(num_joysticks);
+			std::cout << "Please enter the index: ";
+			std::string index;
+			std::getline(std::cin, index);
+			if(!index.empty()) {
+				int8_t chosenIndex = std::stoi(index);
+				if(chosenIndex < num_joysticks + 1 && chosenIndex > -1) {
+					if(usingFancy) {
+						TerminalHelpers::incrementLineLarge();
+					}
 
-				SDL_JoystickEventState(SDL_ENABLE);
+					printf("Chosen joystick %d\n", chosenIndex);
 
-				if(chosenIndex == 0) {
-					// Index 0 is always just the keyboard
-					usingKeyboard = true;
-				} else {
-					// Using a normal gamepad
-					usingKeyboard = false;
-					// Open up the Joystick
-					joy = SDL_GameControllerOpen(chosenIndex - 1);
-				}
+					SDL_JoystickEventState(SDL_ENABLE);
+
+					if(chosenIndex == 0) {
+						// Index 0 is always just the keyboard
+						usingKeyboard = true;
+					} else {
+						// Using a normal gamepad
+						usingKeyboard = false;
+						// Open up the Joystick
+						joy = SDL_GameControllerOpen(chosenIndex - 1);
+					}
 
 // Windows Defender is gonna pop up here
 #ifdef _WIN32
-				TerminalHelpers::incrementLineLarge();
-				puts("Please allow the Windows Defender popup to access your private and public network, if applicable");
+					if(usingFancy) {
+						TerminalHelpers::incrementLineLarge();
+					}
+
+					puts("Please allow the Windows Defender popup to access your private and public network, if applicable");
 #endif
 
-				// Get IP data
-				// This is about how large an IP address will ever be
-				char IPAddress[17];
-				GetIP::getMyIP(IPAddress, port);
-				TerminalHelpers::incrementLineLarge();
-				printf("Insert this IP address into JoyCon Droid: %s\n", IPAddress);
+					// Get IP data
+					// This is about how large an IP address will ever be
+					char IPAddress[17];
+					GetIP::getMyIP(IPAddress, port);
+					if(usingFancy) {
+						TerminalHelpers::incrementLineLarge();
+					}
 
-				// Handle gamepad and keyboard updating, both to update and display
-				// Run this in a thread
+					printf("Insert this IP address into JoyCon Droid: %s\n", IPAddress);
 
-				// This will run for as long as needed
-				// The idea is that this doesn't block
-				serverInstance.run(port);
-				// Start thread
-				setUpInputFancyViewer();
-				// Allow event loop to start reading events
-				std::lock_guard<std::mutex> lk(mutexInputHandling);
-				conditionInputHandling.notify_one();
-				startEventLoop = true;
-				// Create from thread so it can be global
-				websocketServerThread = new std::thread(runWebsocketServer);
+					// This will run for as long as needed
+					// The idea is that this doesn't block
+					serverInstance.run(port);
+					// Start thread
+					setUpInputFancyViewer();
+					// Create from thread so it can be global
+					websocketServerThread = new std::thread(runWebsocketServer);
+
+					// Finally, start handing the inputs, no thread
+					inputHandlingFunction();
+				} else {
+					if(usingFancy) {
+						TerminalHelpers::incrementLineLarge();
+					}
+					printf("Index %d is not in the correct bounds\n", chosenIndex);
+				}
 			} else {
-				TerminalHelpers::incrementLineLarge();
-				printf("Index %d is not in the correct bounds\n", chosenIndex);
+				if(usingFancy) {
+					TerminalHelpers::incrementLineLarge();
+				}
+
+				puts("Gamepad not chosen, aborting");
 			}
-		} else {
-			TerminalHelpers::incrementLineLarge();
-			puts("Gamepad not chosen, aborting");
 		}
+		// On done, make sure everything is closed
+		SDL_GameControllerClose(joy);
+		SDL_Quit();
 	}
-	// On done, make sure everything is closed
-	SDL_GameControllerClose(joy);
-	SDL_Quit();
 	// End with no error
 	return 0;
 }
