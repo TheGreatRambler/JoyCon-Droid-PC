@@ -66,7 +66,6 @@ void WebsocketServer::run(int port) {
 
 void WebsocketServer::closeEverything() {
 	// Close it up cleanly
-	m_endpoint.stop_perpetual();
 	m_endpoint.stop_listening();
 	websocketpp::lib::error_code ec;
 	// There should only be one connection, mainHdl
