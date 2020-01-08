@@ -1,22 +1,22 @@
 # Websocket Protocol
 
-Connection between the PC and JoyCon Droid is established with Websockets, with the PC being the server. Primarily, the server sends data to JoyCon Droid, but in certain cases, JoyCon Droid may send it's own messages.
+Connection between the PC and JoyCon Droid is established with Websockets, with the PC being the server. Primarily, the server sends data to JoyCon Droid, but in certain cases, JoyCon Droid may send its own messages.
 
 ## From PC to JoyCon Droid
 ### Connected
-```json
+```
 {
-  "flag": "joystickConnected" // The joystick just connected
+  "flag": "gamepadConnected" // The gamepad just connected
 }
 ```
 ### Disconnected
-```json
+```
 {
-  "flag": "joystickDisconnected" // The joystick just disconnected, also triggers when the PC server closes
+  "flag": "gamepadDisconnected" // The gamepad just disconnected, also triggers when the PC server closes
 }
 ```
 ### Button data
-```json
+```
 {
   "flag": "button",
   "type": "A", // Keyname for the button (eg. A, X, ZL, Plus, Down, LeftJoystick)
@@ -24,7 +24,7 @@ Connection between the PC and JoyCon Droid is established with Websockets, with 
 }
 ```
 ### Joystick data
-```json
+```
 {
   "flag": "joystick",
   "stick": "L", // L for left joystick, R for right joystick
@@ -33,7 +33,7 @@ Connection between the PC and JoyCon Droid is established with Websockets, with 
 }
 ```
 ### Gamepad disgnostic data
-```json
+```
 {
   "flag": "gamepadData",
   "name": "Pro Controller", // The name of the gamepad connected now
@@ -42,13 +42,13 @@ Connection between the PC and JoyCon Droid is established with Websockets, with 
 ```
 ## From JoyCon Droid to PC
 ### Start listening
-```json
+```
 {
   "flag": "startListening" // Start sending input data
 }
 ```
 ### Stop listening
-```json
+```
 {
   "flag": "stopListening" // Stop sending input data
 }
