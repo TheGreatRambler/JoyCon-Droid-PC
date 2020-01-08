@@ -242,9 +242,10 @@ int main(int argc, char* argv[]) {
 		if(websocketServerThread) {
 			// Calling this from another thread, so there might be race conditions
 			serverInstance.closeEverything();
-			websocketServerThread->join();
 		}
-		exit(1);
+		// No need to join the thread, it has been informed and it will stop
+		// Whether it likes it or not
+		exit(0);
 	});
 	if(SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0) {
 		fprintf(stderr, "Unable to init SDL: %s\n", SDL_GetError());
