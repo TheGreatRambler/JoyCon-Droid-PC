@@ -1,0 +1,24 @@
+{
+	"name": "joycon_droid_pc",
+	"version": "1.0.0",
+	"description": "A bridge to connect to JoyCon Droid with a PC",
+	"main": "main.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/TheGreatRambler/JoyCon-Droid-PC.git"
+	},
+	"author": "TheGreatRambler",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/TheGreatRambler/JoyCon-Droid-PC/issues"
+	},
+	"homepage": "https://github.com/TheGreatRambler/JoyCon-Droid-PC#readme",
+	"dependencies": {
+		"cli-table": "^0.3.1",
+		"ip": "^1.1.5",
+		"ws": "^7.2.1"
+	}
+}
