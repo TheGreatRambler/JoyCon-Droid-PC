@@ -17,9 +17,11 @@
 	},
 	"homepage": "https://github.com/TheGreatRambler/JoyCon-Droid-PC#readme",
 	"dependencies": {
+		"ascii-table": "0.0.9",
 		"cli-table": "^0.3.1",
+		"gamecontroller": "0.0.2",
+		"iohook": "^0.6.2",
 		"ip": "^1.1.5",
-		"node-gamepad": "^0.1.15",
 		"ws": "^7.2.1"
 	}
 }
