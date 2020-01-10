@@ -12,5 +12,9 @@ module.exports = {
 
 	restoreTerminalLocation: function() {
 		console.log(`${ESC}8`);
+	},
+
+	deleteLastChar: function() {
+		console.log("\u007F");
 	}
-}
+};

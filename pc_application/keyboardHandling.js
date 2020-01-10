@@ -1,8 +1,23 @@
-module.exports = function(ioHookInstance) {
-	ioHookInstance.on("keydown", function(event) {
-		console.log(event);
+const IoHook = require("iohook");
+
+// When it isn't connected
+var wsInstance;
+
+module.exports.keyboardHandling = function(config) {
+	IoHook.start(false);
+	var keys = config.keyboardKeys;
+	IoHook.on("keydown", function(event) {
+		//var key = String.fromCharCode(event.keycode + 69);
+		//console.log(key);
 	});
-	ioHookInstance.on("jeyup", function(event) {
-		console.log(event);
-	});
+	IoHook.on("keyup", function(event) {});
+};
+
+module.exports.setWs = function(ws) {
+	wsInstance = ws;
+};
+
+module.exports.clearWs = function() {
+	// Set the variable as undefined
+	wsInstance = undefined;
 };
