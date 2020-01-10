@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const Gamepad = require("./gamepadApi/gamepad");
+const Gamepad = require("node-gamepad");
 const Ip = require("ip");
 
 const PORT = 6954;
