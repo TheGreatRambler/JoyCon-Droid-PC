@@ -1,16 +1,16 @@
 {
 	"keyboardKeys": {
-		"i": "x",
-		"k": "b",
-		"j": "y",
-		"l": "a",
-		"e": "LSTICK",
-		"o": "RSTICK",
-		"h": "PLUS",
-		"g": "MINUS",
-		"f": "DUP",
-		"c": "DDOWN",
-		"x": "DLEFT",
-		"v": "DRIGHT"
+		"I": "x",
+		"K": "b",
+		"J": "y",
+		"L": "a",
+		"E": "LSTICK",
+		"O": "RSTICK",
+		"H": "PLUS",
+		"G": "MINUS",
+		"F": "DUP",
+		"C": "DDOWN",
+		"X": "DLEFT",
+		"V": "DRIGHT"
 	}
 }
