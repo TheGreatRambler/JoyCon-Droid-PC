@@ -1,5 +1,8 @@
 const IoHook = require("iohook");
-IoHook.start(true);
+IoHook.start(false);
+
+// IoHook likes to call keydown a lot, so this changes that
+var keyChecker = [];
 
 // When it isn't connected
 var wsInstance;
@@ -7,9 +10,35 @@ var wsInstance;
 module.exports.keyboardHandling = function(config) {
 	var keys = config.keyboardKeys;
 	IoHook.on("keydown", function(event) {
-		var key = String.fromCharCode(event.rawcode);
+		// Check to see if key has been held before
+		if (!keyChecker[event.rawcode]) {
+			var key = String.fromCharCode(event.rawcode);
+			if (wsInstance && keys[key]) {
+				// Send the data
+				wsInstance.send(JSON.stringify({
+					flag: "button",
+					type: keys[key],
+					state: true
+				}));
+			}
+			// It has been held, don't spam
+			keyChecker[event.rawcode] = true;
+		}
 	});
-	IoHook.on("keyup", function(event) {});
+	IoHook.on("keyup", function(event) {
+		var key = String.fromCharCode(event.rawcode);
+		if (wsInstance && keys[key]) {
+			// Send the data
+			wsInstance.send(JSON.stringify({
+				flag: "button",
+				type: keys[key],
+				// Same thing as before, just the button has been unpressed
+				state: false
+			}));
+		}
+		// Automatically set to off
+		keyChecker[event.rawcode] = false;
+	});
 };
 
 module.exports.setWs = function(ws) {

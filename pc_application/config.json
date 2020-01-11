@@ -1,16 +1,36 @@
 {
 	"keyboardKeys": {
-		"I": "x",
-		"K": "b",
-		"J": "y",
-		"L": "a",
-		"E": "LSTICK",
-		"O": "RSTICK",
-		"H": "PLUS",
-		"G": "MINUS",
-		"F": "DUP",
-		"C": "DDOWN",
-		"X": "DLEFT",
-		"V": "DRIGHT"
+		"I": "X",
+		"K": "B",
+		"J": "Y",
+		"L": "A",
+		"E": "LeftJoystick",
+		"O": "RightJoystick",
+		"H": "Plus",
+		"G": "Minus",
+		"F": "Up",
+		"C": "Down",
+		"X": "Left",
+		"V": "Right",
+		"R": "ZL",
+		"U": "ZR",
+		"T": "L",
+		"Y": "R"
+	},
+	"gamepadKeys": {
+		"default": {
+			"X": "Y",
+			"A": "B",
+			"B": "A",
+			"Y": "X",
+			"L": "ZL",
+			"R": "ZR",
+			"Up": "Up",
+			"Right": "Right",
+			"Down": "Down",
+			"Left": "Left",
+			"Start": "Plus",
+			"Select": "Minus"
+		}
 	}
 }

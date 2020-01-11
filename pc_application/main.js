@@ -66,15 +66,18 @@ async function init() {
 	// Setup WS server
 	await listGamepads();
 	readline.question("Index: ", function(index) {
+		// Don't forget to close as soon as possible
+		readline.close();
 		if (index == "0") {
 			usingKeyboard = true;
 			console.log("Keyboard chosen");
 			KeyboardHandling.keyboardHandling(CONFIG);
 		} else {
 			usingKeyboard = false;
+			// Account for keyboard option
+			var gamepadName = Gamecontroller.getDevices()[Number(index - 1)];
 			console.log(gamepadName + " chosen");
-			var gamepadName = Gamecontroller.getDevices(Number(index));
-			GamepadHandling.gamepadHandling(Gamecontroller);
+			GamepadHandling.gamepadHandling(gamepadName, CONFIG);
 		}
 		// Setup server last
 		setupServer();
@@ -85,7 +88,7 @@ async function init() {
 // This is async as well
 init();
 // Listen for ctrl+c
-console.log("Use CTRL+C twice to exit");
+console.log("Use CTRL+C to exit");
 process.on("exit", function() {
 	// Needs to be unloaded correctly
 	IoHook.unload();
