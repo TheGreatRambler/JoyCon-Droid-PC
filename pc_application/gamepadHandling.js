@@ -14,6 +14,7 @@ module.exports.gamepadHandling = function(gamepadName, config) {
 		Object.keys(gamepadKeys).forEach(function(key) {
 			// Create function for each one
 			controller.on(key + ":press", function() {
+				console.log(key);
 				// Key pressed
 				if (wsInstance) {
 					// Send the data
@@ -25,6 +26,7 @@ module.exports.gamepadHandling = function(gamepadName, config) {
 				}
 			});
 			controller.on(key + ":release", function() {
+				console.log(key);
 				// Key released
 				if (wsInstance) {
 					// Send the data
